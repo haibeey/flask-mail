@@ -28,6 +28,7 @@ from email.mime.text import MIMEText
 from email.header import Header
 from email.utils import formatdate, formataddr, make_msgid, parseaddr
 from contextlib import contextmanager
+from hashlib import sha256
 
 from flask import current_app
 
@@ -133,7 +134,7 @@ def _has_newline(line):
 
 class Connection(object):
     """Handles connection to host."""
-
+    connections={}
     def __init__(self, mail):
         self.mail = mail
 
@@ -148,10 +149,22 @@ class Connection(object):
         return self
 
     def __exit__(self, exc_type, exc_value, tb):
-        if self.host:
-            self.host.quit()
+        pass
 
     def configure_host(self):
+        identity=sha256(self.mail.server+
+                        self.mail.port+
+                        self.mail.username+
+                        self.mail.password+
+                        "true" if self.mail.use_ssl else "false"+
+                        "true" if self.mail.use_tls else "false"
+                        )
+        if Connection.connections.get(identity,False):
+            host=Connection.connections[identity].host
+            if host.sock and host.sock._closed is False:
+                return Connection.connections[identity]
+            Connection.connections.pop(identity)
+
         if self.mail.use_ssl:
             host = smtplib.SMTP_SSL(self.mail.server, self.mail.port)
         else:
@@ -164,6 +177,7 @@ class Connection(object):
         if self.mail.username and self.mail.password:
             host.login(self.mail.username, self.mail.password)
 
+        Connection.connections[identity]=host
         return host
 
     def send(self, message, envelope_from=None):
